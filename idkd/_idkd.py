@@ -16,21 +16,22 @@ import numbers
 from warnings import warn
 import numpy as np
 from sklearn.base import BaseEstimator, OutlierMixin
-from sklearn.metrics import euclidean_distances
-from sklearn.utils.validation import check_is_fitted, check_random_state
-from _isokernel import IsoKernel
+from sklearn.utils.validation import check_is_fitted
+from ._ik_anne import IK_ANNE
+from ._ik_inne import IK_iNNE
+
 
 MAX_INT = np.iinfo(np.int32).max
 MIN_FLOAT = np.finfo(float).eps
 
 
 class IDKD(OutlierMixin, BaseEstimator):
-    """ Isolation-based anomaly detection using nearest-neighbor ensembles.
+    """Isolation-based anomaly detection using nearest-neighbor ensembles.
     The INNE algorithm uses the nearest neighbour ensemble to isolate anomalies.
     It partitions the data space into regions using a subsample and determines an
     isolation score for each region. As each region adapts to local distribution,
     the calculated isolation score is a local measure that is relative to the local
-    neighbourhood, enabling it to detect both global and local anomalies. INNE has 
+    neighbourhood, enabling it to detect both global and local anomalies. INNE has
     linear time complexity to efficiently handle large and high-dimensional datasets
     with complex distributions.
     Parameters
@@ -42,6 +43,8 @@ class IDKD(OutlierMixin, BaseEstimator):
             - If int, then draw `max_samples` samples.
             - If float, then draw `max_samples` * X.shape[0]` samples.
             - If "auto", then `max_samples=min(8, n_samples)`.
+    algorithm : {"inne", "anne", "auto"}, default="inne"
+        isolation algorithm to use. The original algorithm in paper is `"inne"`.
     contamination : "auto" or float, default="auto"
         The amount of contamination of the data set, i.e. the proportion
         of outliers in the data set. Used when fitting to define the threshold
@@ -55,8 +58,8 @@ class IDKD(OutlierMixin, BaseEstimator):
         See :term:`Glossary <random_state>`.
     References
     ----------
-    .. [1] T. R. Bandaragoda, K. Ming Ting, D. Albrecht, F. T. Liu, Y. Zhu, and J. R. Wells. 
-           "Isolation-based anomaly detection using nearest-neighbor ensembles." In Computational 
+    .. [1] T. R. Bandaragoda, K. Ming Ting, D. Albrecht, F. T. Liu, Y. Zhu, and J. R. Wells.
+           "Isolation-based anomaly detection using nearest-neighbor ensembles." In Computational
            Intelligence, vol. 34, 2018, pp. 968-998.
     Examples
     --------
@@ -68,11 +71,19 @@ class IDKD(OutlierMixin, BaseEstimator):
     array([ 1,  1, -1])
     """
 
-    def __init__(self, n_estimators=200, max_samples="auto", contamination="auto", random_state=None):
+    def __init__(
+        self,
+        n_estimators=200,
+        max_samples="auto",
+        contamination="auto",
+        algorithm="inne",
+        random_state=None,
+    ):
         self.n_estimators = n_estimators
         self.max_samples = max_samples
         self.random_state = random_state
         self.contamination = contamination
+        self.algorithm = algorithm
 
     def fit(self, X, y=None):
         """
@@ -101,8 +112,7 @@ class IDKD(OutlierMixin, BaseEstimator):
                 raise ValueError(
                     "max_samples (%s) is not supported."
                     'Valid choices are: "auto", int or'
-                    "float"
-                    % self.max_samples
+                    "float" % self.max_samples
                 )
 
         elif isinstance(self.max_samples, numbers.Integral):
@@ -140,21 +150,31 @@ class IDKD(OutlierMixin, BaseEstimator):
         else:
             # else, define offset_ wrt contamination parameter
             self.offset_ = np.percentile(
-                self.score_samples(X), 100.0 * self.contamination)
+                self.score_samples(X), 100.0 * self.contamination
+            )
 
         return self
-    
+
     def _kernel_mean_embedding(self, X):
-        return np.mean(X, axis=0)/self.max_samples_
+        return np.mean(X, axis=0) / self.max_samples_
 
     def _fit(self, X):
+        if self.algorithm == "inne":
+            isokernel = IK_iNNE
+        elif self.algorithm == "anne":
+            isokernel = IK_ANNE
+        else:
+            raise NotImplementedError
 
-        iso_kernel = IsoKernel(
-            self.n_estimators, self.max_samples_, self.random_state)
+        iso_kernel = isokernel(
+            n_estimators=self.n_estimators,
+            max_samples=self.max_samples_,
+            random_state=self.random_state,
+        )
         self.iso_kernel = iso_kernel.fit(X)
-        self.kme = self._kernel_mean_embedding(iso_kernel.transform(X))
+        #self.kme = self._kernel_mean_embedding(iso_kernel.transform(X))
         self.is_fitted_ = True
-            
+
         return self
 
     def predict(self, X):
@@ -217,11 +237,12 @@ class IDKD(OutlierMixin, BaseEstimator):
             The lower, the more abnormal.
         """
 
-        check_is_fitted(self, 'is_fitted_')
+        check_is_fitted(self, "is_fitted_")
         # Check data
         X = self._validate_data(X, accept_sparse=False, reset=False)
 
         X_transformed = self.iso_kernel.transform(X)
-        scores = np.dot(X_transformed, self.kme.T)
-        
+        kme = np.average(X_transformed, axis=0) / self.max_samples_
+        scores = np.dot(X_transformed, kme.T)
+
         return -scores

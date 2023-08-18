@@ -27,7 +27,7 @@ MAX_INT = np.iinfo(np.int32).max
 MIN_FLOAT = np.finfo(float).eps
 
 
-class IsoKernel(TransformerMixin, BaseEstimator):
+class IK_ANNE(TransformerMixin, BaseEstimator):
     """  Build Isolation Kernel feature vector representations via the feature map
     for a given dataset.
 

@@ -23,25 +23,46 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # if isokernel is installed, no need to use the following line
 from IsoKernel import IsoKernel
 from IsoKernel import IsoDisKernel
-from IsoKernel._isokernel_online import IsoKernelOnline
 
 @pytest.fixture
 def data():
     return load_wine(return_X_y=True)
 
 
-def test_ikde(data):
+def test_isokernel_transform(data):
+    X, y = data
+    ik = IsoKernel(n_estimators=200, max_samples=3)
+    emb_X = ik.fit_transform(X)
+    assert emb_X.shape[0] == X.shape[0]
+    assert emb_X.shape[1] == 200*3
+
+
+def test_isokernel_similarity(data):
+    X, y = data
+    ik = IsoKernel(n_estimators=200, max_samples=3)
+    ik = ik.fit(X)
+    print(ik.similarity(X))
+
+
+def test_isodiskernel_transform(data):
     X, y = data
     idk = IsoDisKernel(n_estimators=200, max_samples=3)
     idk = idk.fit(X)
-    D_i = X[-1]
-    print(idk.similarity(D_i, X))
+    D_i = X[:10]
+    D_j = X[-10:]
+    print(idk.transform(D_i, D_j))
 
-def test_oikde(data):
+
+def test_isodiskernel_similarity(data):
     X, y = data
-    ol_ik = IsoKernelOnline(n_estimators=200, max_samples=3)
-    for i, item in enumerate(X, start=1):
-        ol_ik.add_observation(item)
-        
+    idk = IsoDisKernel(n_estimators=200, max_samples=3)
+    idk = idk.fit(X)
+    D_i = X[:10]
+    D_j = X[-10:]
     
-    pass
+    ikm_D_i, ikm_D_j = idk.transform(D_i, D_j)
+    # get kernel mean embedding 
+    kme_D_i, kme_D_j = idk.kernel_mean_embedding(ikm_D_i), idk.kernel_mean_embedding(ikm_D_j)
+    # get similarity between two distributions.
+    print(idk.similarity(D_i, D_j))
+    print(idk.kme_similarity(kme_D_i, kme_D_j))
